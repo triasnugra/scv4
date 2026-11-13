@@ -1,0 +1,38 @@
+name: Backtest (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: "Simbol dasar (mis. BTC, ETH, SOL)"
+        default: "BTC"
+      days:
+        description: "Jumlah hari yang diuji"
+        default: "30"
+      step:
+        description: "Loncat N candle 15m per langkah (lebih besar = lebih cepat)"
+        default: "2"
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Backtest
+        run: |
+          mkdir -p out
+          python -m scalp.main backtest --symbol "${{ inputs.symbol }}" --days "${{ inputs.days }}" \
+            --step "${{ inputs.step }}" --json "out/backtest_${{ inputs.symbol }}.json" | tee out/summary.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtest-${{ inputs.symbol }}
+          path: out/
