@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mesin Scalping Crypto</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#14171c;--mut:#5d6773;--line:#e2e6ea;--ok:#0f8a4b;--bad:#c62b3a;--warn:#b7791f;--info:#2f62c9;--chip:#eef1f4}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1013;--card:#171a1f;--ink:#e8ebef;--mut:#9aa4b0;--line:#272c33;--ok:#35c27a;--bad:#ef5b69;--warn:#e0a63d;--info:#6b95ee;--chip:#222730}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+header{padding:20px 16px 8px;max-width:1100px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--mut);font-size:13px}
+main{max-width:1100px;margin:0 auto;padding:8px 16px 40px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.sym{font-weight:700;font-size:17px}
+.badge{padding:3px 10px;border-radius:999px;font-weight:700;font-size:12px;color:#fff}
+.b-LONG_SCALP{background:var(--ok)}.b-SHORT_SCALP{background:var(--bad)}.b-WAIT{background:var(--warn)}.b-NO_TRADE{background:#6b7480}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.chip{background:var(--chip);border-radius:6px;padding:2px 8px;font-size:12px}
+.chip.pass{color:var(--ok)}.chip.fail{color:var(--bad)}.chip.reduce,.chip.wait{color:var(--warn)}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0}
+td{padding:3px 0;border-bottom:1px dashed var(--line)}td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.bar{height:6px;border-radius:3px;background:var(--chip);overflow:hidden;margin:4px 0 8px}.bar>i{display:block;height:100%;background:var(--info)}
+ul{margin:4px 0 4px 18px;padding:0;font-size:13px}
+.mut{color:var(--mut);font-size:12px}
+h2{font-size:16px;margin:26px 0 8px}
+.wrap{overflow-x:auto}
+th{text-align:left;font-size:12px;color:var(--mut);padding:4px 8px 4px 0}
+.tbl td{padding:4px 8px 4px 0;text-align:left}
+.pos{color:var(--ok)}.neg{color:var(--bad)}
+footer{max-width:1100px;margin:0 auto;padding:0 16px 30px;color:var(--mut);font-size:12px}
+details summary{cursor:pointer;color:var(--mut);font-size:13px;margin-top:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Mesin Analisis Scalping Crypto</h1>
+  <div class="sub" id="meta"></div>
+</header>
+<main>
+  <div class="grid" id="cards"></div>
+  <h2>Riwayat sinyal (dilacak otomatis)</h2>
+  <div class="mut" id="stats"></div>
+  <div class="wrap"><table class="tbl" id="hist"></table></div>
+</main>
+<footer>
+  Alat bantu analisis, bukan nasihat keuangan dan bukan jaminan profit. Trading futures berleverage berisiko kehilangan modal.
+  Parameter bertanda [C] di config.yaml adalah hipotesis yang harus di-backtest. Data memakai candle tertutup; GitHub Actions
+  berjalan best-effort sehingga data bisa tertunda beberapa menit.
+</footer>
+<script id="payload" type="application/json">__DATA__</script>
+<script>
+const P = JSON.parse(document.getElementById('payload').textContent);
+const fmt = (x) => x === null || x === undefined ? '-' : (Math.abs(x) >= 100 ? x.toFixed(2) : Math.abs(x) >= 1 ? x.toFixed(4) : x.toPrecision(5));
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const t = new Date(P.generated_at);
+document.getElementById('meta').textContent =
+  'Diperbarui ' + t.toLocaleString('id-ID', {timeZone: 'Asia/Jakarta'}) + ' WIB  |  Provider: ' + (P.providers || []).join(', ') + '  |  Mode: ' + P.mode;
+
+const cards = document.getElementById('cards');
+for (const r of P.results) {
+  const g = Object.entries(r.gates || {}).map(([k, v]) =>
+    `<span class="chip ${String(v.status).toLowerCase()}" title="${esc(v.note || '')}">${k}: ${esc(v.status)}</span>`).join('');
+  let body = '';
+  if (r.levels && r.levels.entry) {
+    const L = r.levels;
+    body += `<table>
+      <tr><td>Trigger</td><td>${esc(r.trigger.type)} ${esc(r.trigger.direction)} (${esc(r.trigger.status)})</td></tr>
+      <tr><td>Level</td><td>${esc(r.trigger.level_label || '')}</td></tr>
+      <tr><td>Entry</td><td>${fmt(L.entry)}${r.trigger.limit_order ? ' (limit)' : ''}</td></tr>
+      <tr><td>Stop</td><td>${fmt(L.stop)} (${L.stop_pct}%)</td></tr>
+      <tr><td>TP1 / TP2</td><td>${fmt(L.tp1)} / ${fmt(L.tp2)}</td></tr>
+      <tr><td>R:R bersih</td><td>${L.rr_tp1} / ${L.rr_tp2}${L.synthetic_tp ? ' (TP sintetis)' : ''}</td></tr>
+      <tr><td>Risiko / leverage</td><td>${r.size.risk_pct}% / ${r.size.leverage_effective}x</td></tr>
+    </table>`;
+  }
+  const sc = r.score || 0;
+  body += `<div class="mut">Skor ${sc.toFixed(0)}/100</div><div class="bar"><i style="width:${Math.min(100, sc)}%"></i></div>`;
+  const reasons = (r.reasons || []).map(x => `<li>${esc(x)}</li>`).join('');
+  if (reasons) body += `<ul>${reasons}</ul>`;
+  const scen = (r.scenarios || []).map(s => `<li><b>${esc(s.side)}</b> (${esc(s.type)}): ${esc(s.text)}</li>`).join('');
+  if (scen) body += `<details><summary>Skenario bersyarat</summary><ul>${scen}</ul></details>`;
+  const inv = (r.invalidated_if || []).map(x => `<li>${esc(x)}</li>`).join('');
+  if (inv) body += `<details><summary>Batal jika</summary><ul>${inv}</ul></details>`;
+  const conf = Object.entries(r.confirmations || {}).map(([k, v]) => `<li>${v.ok ? '✔' : '✘'} ${esc(k)}: ${esc(v.note || '')}</li>`).join('');
+  if (conf) body += `<details><summary>Konfirmasi</summary><ul>${conf}</ul></details>`;
+  const nm = (r.near_miss || []).map(x => `<li>${esc(x)}</li>`).join('');
+  if (nm) body += `<details><summary>Hampir terjadi / gagal</summary><ul>${nm}</ul></details>`;
+  cards.insertAdjacentHTML('beforeend', `<div class="card">
+    <div class="row"><span class="sym">${esc(r.symbol)} <span class="mut">${fmt(r.price)}</span></span>
+    <span class="badge b-${esc(r.decision)}">${esc(r.decision)}</span></div>
+    <div class="mut">${esc(r.season || '-')} | ${esc(r.regime || '-')} | zona ${esc((r.location || {}).zone || '-')}${r.range && r.range.valid ? ` | RL ${fmt(r.range.low)} / RH ${fmt(r.range.high)}` : ''}</div>
+    <div class="chips">${g}</div>${body}</div>`);
+}
+
+const S = P.stats || {};
+document.getElementById('stats').textContent =
+  `Total ${S.total_signals ?? 0} sinyal | selesai ${S.closed ?? 0} | terbuka ${S.open ?? 0} | win rate ${S.win_rate ?? '-'}% | total ${S.total_r ?? 0}R | expectancy ${S.expectancy_r ?? '-'}R | max DD ${S.max_drawdown_r ?? 0}R`;
+const h = document.getElementById('hist');
+const rows = (P.signals || []).slice().reverse().slice(0, 60).map(s => {
+  const cls = s.r > 0 ? 'pos' : (s.r < 0 ? 'neg' : '');
+  return `<tr><td>${new Date(s.time).toLocaleString('id-ID', {timeZone: 'Asia/Jakarta', hour12: false})}</td><td>${esc(s.symbol)}</td><td>${esc(s.direction)}</td><td>${esc(s.trigger)}</td><td>${fmt(s.entry)}</td><td>${fmt(s.stop)}</td><td>${esc(s.status)}</td><td class="${cls}">${(s.r || 0).toFixed(2)}R</td></tr>`;
+}).join('');
+h.innerHTML = '<tr><th>Waktu (WIB)</th><th>Simbol</th><th>Arah</th><th>Trigger</th><th>Entry</th><th>Stop</th><th>Status</th><th>Hasil</th></tr>' +
+  (rows || '<tr><td colspan="8" class="mut">Belum ada sinyal. NO_TRADE adalah hasil yang valid.</td></tr>');
+</script>
+</body>
+</html>

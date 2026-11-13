@@ -1,0 +1,164 @@
+# =====================================================================
+# KONFIGURASI MESIN SCALPING (logika Eliz + tambahan Claude)
+#   [E] = berasal dari materi Eliz
+#   [C] = parameter/hipotesis tambahan Claude -> WAJIB di-backtest
+# Semua nilai di sini bisa diubah tanpa menyentuh kode.
+# =====================================================================
+
+symbols: [BTC, ETH, SOL, PEPE]      # aset dasar yang dianalisis
+quote: USDT
+majors: [BTC, ETH]                   # koin besar -> stop lebih rapat
+obv_symbols: [BTC, ETH]              # [E] OBV hanya untuk koin volume tinggi
+
+data:
+  providers: [binance_vision, okx, bybit]   # urutan fallback (satu provider dipakai utk semua TF per simbol)
+  symbol_overrides:                         # jika nama simbol berbeda di exchange tertentu
+    bybit: { PEPE: 1000PEPEUSDT }
+  bars: { "5m": 600, "15m": 500, "1h": 500, "4h": 300, "1d": 300 }
+  timeout_sec: 15
+  use_orderbook: true                       # dinding order book = konfirmasi opsional
+
+account:                                    # [C] hanya untuk menghitung ukuran posisi (analisis)
+  equity_usd: 1000
+  risk_pct: 0.75                            # risiko per trade (% ekuitas)
+  max_leverage_effective: 10
+  fee_bps: 5                                # per sisi
+  slippage_bps: 3                           # per sisi
+
+gate0_data:                                 # [C]
+  min_bars: { "15m": 200, "1h": 150, "4h": 100, "1d": 60 }
+  max_stale_bars: 2                         # candle 15m terakhir tidak boleh lebih tua dari N bar
+  min_quote_volume_24h: 20000000            # USD; koin tidak likuid ditolak
+
+gate1_context:                              # [E] logikanya, [C] angkanya
+  stand_aside_windows: []                   # isi manual, contoh di README (FOMC/CPI dsb.)
+  shock_move_pct: 10.0                      # candle harian / 24 jam >= ini = post-shock
+  shock_cooldown_hours: 36                  # tunggu 24-48 jam
+  post_shock_policy: edge_only              # edge_only | stand_aside
+  monday_range_policy: reduce               # none | reduce  (Senin = range kotor)
+  monday_size_mult: 0.5
+  low_liquidity_ratio: 0.5                  # volume 24 jam < 50% median harian -> kurangi ukuran
+  reduced_size_mult: 0.5
+
+gate2_season:                               # [E] tren dihormati, [C] cara menghitung
+  long_threshold: 3
+  short_threshold: -3
+  allow_counter_trend: true                 # short di musim long / sebaliknya (ukuran kecil)
+  counter_trend_size_mult: 0.5
+  counter_trend_extra_score: 10
+  btc_opposite_size_mult: 0.5               # altcoin berlawanan dengan musim BTC
+  block_short_at_macro_support: true        # [E] jangan short BTC di support kuat
+  macro_lookback_days: 60
+  macro_zone_atr: 0.5                       # jarak (ATR 1D) dari low/high makro yang dianggap support/resistance kuat
+
+gate3_range:                                # [E] kerja di tepi range H1, [C] angkanya
+  lookback_bars: 72                         # 1H
+  exclude_recent_options: [6, 12, 24]
+  pivot_k: 2
+  touch_tol_atr: 0.6
+  min_touches: 2
+  min_height_atr: 3.0
+  max_height_atr: 25.0
+  max_drift: 0.6
+  mid_zone: [0.40, 0.60]                    # zona tengah = no-man's land
+  edge_zone: 0.25
+
+levels:                                     # bobot confluence [C]
+  weights:
+    range_edge: 1.0
+    monday: 0.8
+    prev_day: 0.8
+    prev_week: 0.9
+    fvg_4h: 0.6
+    fvg_1h: 0.4
+    fib_0.786: 0.9
+    fib_0.75: 0.9
+    fib_0.5: 0.5
+    fib_0.25: 0.3
+    ema: 0.4
+    htf_pivot: 0.7
+  confluence_tol_atr: 0.5
+  confluence_target: 2.0                    # jumlah bobot utk skor confluence penuh
+  fib_ratios: [0.25, 0.5, 0.75, 0.786]      # [E]
+  min_impulse_atr: 4.0
+  fvg_min_gap_atr: 0.3
+
+triggers:
+  tf_trigger: 15m
+  t1:                                       # deviation + reclaim (stop run)
+    lookback_bars: 16
+    sweep_min_atr: 0.10
+    max_reclaim_bars: 3
+    stop_buffer_atr: 0.15
+    volume_mult: 1.5
+    wick_ratio: 0.5
+    three_tap_tol_atr: 0.3
+    require_quality_feature: true           # [C] sapuan tanpa volume/wick/double/three-tap dianggap lemah
+  t2:                                       # breakout -> retest
+    lookback_bars: 24                       # 1H
+    hold_bars: 2
+    volume_mult: 1.2
+    require_volume: true
+    eps_atr: 0.05
+    stop_buffer_atr: 0.15
+  t3:                                       # pullback fibonacci 0.75 / 0.786
+    require_confluence: true
+    stop_buffer_atr: 0.15
+    reaction_lookback_bars: 16
+  t4:                                       # reclaim trendline / flip EMA
+    ema_len: 20
+    lookback_bars: 10
+    stop_buffer_atr: 0.15
+  min_level_weight: 0.7                     # [C] T1/T2 hanya di level penting (range edge, Monday, prev day/week, fib 0.75/0.786, pivot HTF)
+  retest_tol_atr: 0.35                      # harga dianggap "di level" jika <= ini dari entry
+  chase_limit_atr: 1.5                      # lebih jauh dari ini = MISSED (jangan kejar)
+
+confirmations:                              # [E] konfirmasi, bukan pengganti trigger
+  min_confirmations: 1
+  volume_spike_mult: 1.5
+  wick_ratio: 0.5
+  orderbook_wall_mult: 4.0
+  orderbook_wall_tol_pct: 0.4
+  obv_lookback_days: 10
+  rsi_len: 14
+
+risk:
+  max_stop_pct: { majors: 1.8, alts: 5.0 }  # [E] altcoin ~2-5%, BTC/ETH lebih rapat [C]
+  min_stop_atr15: 0.5                       # stop lebih rapat dari ini = noise
+  min_rr_tp1: 1.0                           # [C] setelah fee+slippage
+  min_rr_tp2: 2.0                           # [C]
+  max_tp_pct: { majors: 3.0, alts: 8.0 }    # scalp: target tidak boleh menjadi swing
+  allow_synthetic_tp: true
+  synthetic_tp_r: [1.5, 2.5]
+  tp1_fraction: 0.6                         # ambil sebagian di TP1
+  move_stop_to_be_after_tp1: true           # [E]
+  time_stop_hours: 6
+  tight_stop_fraction: 0.6                  # stop cadangan lebih rapat [E: stop kedua]
+  limits:
+    max_trades_per_day: 4                   # [E] sangat selektif, [C] angkanya
+    max_daily_loss_r: 3.0
+    loss_streak_cooldown: 2
+    cooldown_minutes: 60
+
+scoring:                                    # [C] kalibrasi lewat backtest
+  weights:
+    trend: 20
+    location: 15
+    confluence: 15
+    trigger: 20
+    confirmation: 10
+    rr: 15
+    context: 5
+  trade_threshold: 75
+  wait_threshold: 66
+  trigger_base: { T1: 0.60, T2: 0.55, T3: 0.55, T4: 0.45 }
+
+backtest:
+  warmup_days: 120
+  days: 30
+  step: 1                                    # setiap N candle 15m
+  max_open_per_symbol: 1
+  cooldown_bars: 4
+
+history:
+  max_signals: 300
