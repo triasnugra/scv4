@@ -1,0 +1,75 @@
+name: Scalp Analysis and Deploy
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"      # best-effort: GitHub bisa menunda beberapa menit
+  workflow_dispatch:
+    inputs:
+      demo:
+        description: "Pakai data sintetis (uji tampilan tanpa jaringan)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: scalp-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests (kecuali run terjadwal)
+        if: github.event_name != 'schedule'
+        run: python -m pytest -q
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Ambil history.json dari deploy sebelumnya
+        run: |
+          mkdir -p site
+          curl -fsSL --max-time 20 "${{ steps.pages.outputs.base_url }}/history.json" -o site/history.json \
+            || echo '{"signals": []}' > site/history.json
+          python -c "import json; json.load(open('site/history.json'))" \
+            || echo '{"signals": []}' > site/history.json
+
+      - name: Analisis scalping
+        run: |
+          if [ "${{ github.event_name == 'workflow_dispatch' && inputs.demo }}" = "true" ]; then
+            python -m scalp.main analyze --out site --demo
+          else
+            python -m scalp.main analyze --out site
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
